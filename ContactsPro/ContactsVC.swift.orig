@@ -1,0 +1,424 @@
+//
+//  PersonBaseVC.swift
+//  PoliceNetwork
+//
+//  Created by Dmitry Shmidt on 18/01/15.
+//  Copyright (c) 2015 Dmitry Shmidt. All rights reserved.
+//
+import UIKit
+import Realm
+
+import AddressBook
+import AddressBookUI
+
+class ContactsVC: UITableViewController, UISearchResultsUpdating, UISearchBarDelegate, ABPersonViewControllerDelegate, ABNewPersonViewControllerDelegate{
+    
+    enum PersonsSearchScope: Int {
+        case Name = 0, Car, Address, Note, Phone, Arrests
+        
+        //        func predicate() -> NSPredicate {
+        //            switch self {
+        //            case .Name:
+        //                return "ace"
+        //            case .Car:
+        //                return "jack"
+        //            case .Address:
+        //                return "queen"
+        //            case .Note:
+        //                return "king"
+        //            default:
+        //                return NSPredicate(value: true)
+        //            }
+        //        }
+    }
+    
+    // note: if the contacts change behind your back while your app is open...
+    // your retained address book will go out of date
+    // unfortunately the way around that is to register an external change callback...
+    // ...and you can't do that using Swift alone
+    let addressBookModel = AddressBookModel()
+
+    var searchController : UISearchController!
+    var searchResults = Person.allObjects().sortedResultsUsingProperty("lastName", ascending: true)
+    
+    var array = Person.allObjects().sortedResultsUsingProperty("lastName", ascending: true)
+    var notificationToken: RLMNotificationToken?
+    
+    let collation = UILocalizedIndexedCollation.currentCollation() as UILocalizedIndexedCollation
+    var sections: [[Person]] = []
+    var searchResultsSections: [[Person]] = []
+    var objects: RLMResults! {
+        didSet {
+            let selector: Selector = "lastName"
+            
+            sections = [[Person]](count: collation.sectionTitles.count, repeatedValue: [])
+            
+            for object in array {
+                let sectionNumber = collation.sectionForObject(object, collationStringSelector: selector)
+                //                println("object is \(object)")
+                sections[sectionNumber].append(object as Person)
+            }
+            //            println("sections is \(sections)")
+            tableView.reloadData()
+        }
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        addressBookModel.synchronize()
+
+        
+        //        setupSearchController()
+        // Set realm notification block
+        notificationToken = RLMRealm.defaultRealm().addNotificationBlock { note, realm in
+            println(note)
+            self.objects = self.array
+            self.reloadData()
+        }
+        objects = array
+        
+        setupUI()
+        
+//        reloadData()
+    }
+    
+    // UI
+    
+    func setupUI() {
+        
+        setupSearchController()
+        
+
+        //        title = "SwiftExample"
+        navigationItem.leftBarButtonItem = editButtonItem()
+        navigationItem.rightBarButtonItem = UIBarButtonItem(barButtonSystemItem: .Add, target: self, action: "add")
+    }
+    
+    override func viewDidAppear(animated: Bool) {
+        super.viewDidAppear(animated)
+        //        addressBookModel.determineStatus()
+        //        NSNotificationCenter.defaultCenter().addObserver(self, selector: "determineStatus", name: UIApplicationWillEnterForegroundNotification, object: nil)
+    }
+    
+    func setupSearchController(){
+        var searchResultsController = UITableViewController(style: .Plain) as UITableViewController
+ 
+        
+        
+        searchResultsController.tableView.delegate = self
+        searchResultsController.tableView.dataSource = self
+        //        searchResultsController.tableView.rowHeight = 63
+
+        
+        searchController = UISearchController(searchResultsController: searchResultsController)
+        searchController.searchResultsUpdater = self
+        
+        searchController.searchBar.sizeToFit()
+        //        searchController.searchBar.tintColor = UIColor.whiteColor()
+        searchController.searchBar.delegate = self
+        //    searchController.searchBar.barTintColor = UIColor(red: 0, green: 104.0/255.0, blue: 55.0/255.0, alpha: 1.0)
+        //    tableView.tableHeaderView?.addSubview(searchController.searchBar)
+        let b = searchController.searchBar
+        b.sizeToFit() // crucial, trust me on this one
+        searchController.searchBar.scopeButtonTitles = ["Names","Phones","Other"]
+        // b.scopeButtonTitles = ["Hey", "Ho"] // shows during search only; uncomment to see
+        // (not used in this example; just showing the interface)
+        // WARNING: do NOT call showsScopeBar! it messes things up!
+        // (buttons will show during search if there are titles)
+        b.autocapitalizationType = .None
+        tableView.tableHeaderView = b
+        definesPresentationContext = true
+
+        tableView.registerNib(UINib(nibName: "ContactCell", bundle: nil), forCellReuseIdentifier: "ContactCell")
+        searchResultsController.tableView.registerNib(UINib(nibName: "ContactCell", bundle: nil), forCellReuseIdentifier: "ContactCell")
+    }
+    
+    override func numberOfSectionsInTableView(tableView: UITableView) -> Int {
+        
+        let numberOfSections = UILocalizedIndexedCollation.currentCollation().sectionTitles.count
+        return numberOfSections
+    }
+    
+    override func tableView(tableView: UITableView?, numberOfRowsInSection section: Int) -> Int {
+        if (searchController.active) {
+            
+//            if searchResultsSections.count > 0{
+                return Int(searchResultsSections[section].count)
+//            }else{
+//                return collation.sectionTitles.count
+//            }
+        } else {
+//            if sections.count > 0{
+                return Int(sections[section].count)
+//            }else{
+//                return collation.sectionTitles.count
+//            }
+        }
+    }
+    
+    override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCellWithIdentifier("ContactCell", forIndexPath: indexPath) as ContactCell
+        
+        var person: Person
+        if (searchController.active) {
+//            if searchResultsSections.count > 0{
+                let objectsInSection = searchResultsSections[indexPath.section]
+                person = objectsInSection[indexPath.row] as Person
+                configure(cell: cell, forPerson: person)
+//            }
+        } else {
+//            if sections.count > 0{
+                let objectsInSection = sections[indexPath.section]
+                person = objectsInSection[indexPath.row] as Person
+                configure(cell: cell, forPerson: person)
+//            }
+        }
+        
+        return cell
+    }
+    
+    func configure(#cell:ContactCell, forPerson person:Person){
+        cell.textLabel?.attributedText = person.attributedFullName
+        //        cell.textLabel?.text = object.fullName
+        cell.detailTextLabel?.text = person.lastName
+        let image = UIImage(data:person.thumbnailData)
+        cell.imageView?.image = image
+        if image != nil{
+            if let imageView = cell.imageView{
+                imageView.layer.cornerRadius = imageView.bounds.size.width / 2
+                imageView.clipsToBounds = true
+                cell.separatorInset = UIEdgeInsets(top: 0, left: 82, bottom: 0, right: 0)
+            }
+        }
+    }
+    
+    override func tableView(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath) {
+        if editingStyle == .Delete {
+            var person: Person!
+            if (searchController.active) {
+//                if searchResultsSections.count > 0{
+                    let objectsInSection = searchResultsSections[indexPath.section]
+                    person = objectsInSection[indexPath.row] as Person
+//                }
+                
+            } else {
+//                if sections.count > 0{
+                    let objectsInSection = sections[indexPath.section]
+                    person = objectsInSection[indexPath.row] as Person
+//                }
+            }
+            let realm = RLMRealm.defaultRealm()
+            realm.beginWriteTransaction()
+            realm.deleteObject(person)
+            realm.commitWriteTransaction()
+        }
+    }
+    
+    // Actions
+    
+    func reloadData() {
+        array = Person.allObjects().sortedResultsUsingProperty("lastName", ascending: true)
+        tableView.reloadData()
+        println(array.count)
+    }
+    
+    //Collation
+    override func tableView(tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        if (searchController.active) {
+//            if searchResultsSections.count > 0{
+                return searchResultsSections[section].count > 0 ? collation.sectionTitles[section] as? String : nil
+//            }else{
+//                return collation.sectionTitles[section] as? String
+//            }
+            
+        } else {
+//            if sections.count > 0{
+                return sections[section].count > 0 ? collation.sectionTitles[section] as? String : nil
+//            }else{
+//                return collation.sectionTitles[section] as? String
+//            }
+        }
+        
+    }
+    
+    override func sectionIndexTitlesForTableView(tableView: UITableView) -> [AnyObject]! {
+        return collation.sectionIndexTitles
+    }
+    
+    override func tableView(tableView: UITableView, sectionForSectionIndexTitle title: String, atIndex index: Int) -> Int {
+        return collation.sectionForSectionIndexTitleAtIndex(index)
+    }
+    
+    override func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+        //
+        var person: Person!
+        if (searchController.active) {
+            let objectsInSection = searchResultsSections[indexPath.section]
+            person = objectsInSection[indexPath.row] as Person
+        } else {
+            let objectsInSection = sections[indexPath.section]
+            person = objectsInSection[indexPath.row] as Person
+            
+        }
+        let abPerson = ABAddressBookGetPersonWithRecordID(addressBookModel.adbk, ABRecordID(person.recordID))
+        doViewPerson(abPerson.takeRetainedValue())
+    }
+    //Segues
+//    override func prepareForSegue(segue: UIStoryboardSegue, sender: AnyObject?) {
+//        if segue.identifier == "showPerson" {
+//            if let indexPath = tableView.indexPathForSelectedRow() {
+//                let objectsInSection = sections[indexPath.section]
+//                
+//                let object = objectsInSection[indexPath.row] as Person
+//                let controller = segue.destinationViewController as EditPersonVC
+//                controller.person = object
+//                //                let controller = (segue.destinationViewController as UINavigationController).topViewController as DetailViewController
+//                //                controller.detailItem = object
+//                //                controller.navigationItem.leftBarButtonItem = splitViewController?.displayModeButtonItem()
+//                //                controller.navigationItem.leftItemsSupplementBackButton = true
+//            }
+//        }else if segue.identifier == "addPerson" {
+//            let object = add()
+//            let controller = segue.destinationViewController as EditPersonVC
+//            controller.person = object
+//            controller.editing = true
+//        }
+//    }
+    
+    // MARK: - SearchBar Delegate
+    func updateSearchResultsForSearchController(searchController: UISearchController) {
+        print("updateSearchResultsForSearchController")
+        if searchController.searchBar.text.isEmpty{
+            return
+        }
+        let searchString = searchController.searchBar.text.stringByTrimmingCharactersInSet(NSCharacterSet.whitespaceAndNewlineCharacterSet())
+        filterResultsWithSearchString(searchString)
+        let searchResultsController = searchController.searchResultsController as UITableViewController
+        searchResultsController.tableView.reloadData()
+    }
+    
+    func filterResultsWithSearchString(searchString: String) {
+        //        let predicate = NSPredicate(format: "name BEGINSWITH [c]%@", searchString) // 1
+        let scopeIndex = searchController.searchBar.selectedScopeButtonIndex
+        var predicate:NSPredicate
+        let terms = searchString.componentsSeparatedByString(" ")
+        
+        switch scopeIndex {
+        case 0:
+            predicate = namesPredicate(searchString: searchString)
+        case 1:
+            predicate = phonesPredicate(searchString: searchString)
+        case 2:
+            predicate = NSPredicate(value: true)
+        default:
+            predicate = NSPredicate(value: true)
+        }
+        
+        searchResults = Person.objectsWithPredicate(predicate)
+        let selector: Selector = "lastName"
+        
+        searchResultsSections = [[Person]](count: collation.sectionTitles.count, repeatedValue: [])
+        
+        for object in searchResults {
+            let sectionNumber = collation.sectionForObject(object, collationStringSelector: selector)
+            //                println("object is \(object)")
+            searchResultsSections[sectionNumber].append(object as Person)
+        }
+        //            println("sections is \(sections)")
+        tableView.reloadData()
+    }
+    
+    func namesPredicate(#searchString:String) -> NSPredicate {
+        
+        let stringComponents = searchString.componentsSeparatedByString(" ")
+        let terms = searchString.componentsSeparatedByString(" ")
+        var subpredicates = [NSPredicate]()
+        for term in terms{
+            let pred = NSPredicate(format: "(firstName CONTAINS[c] %@) OR (lastName CONTAINS[c] %@)OR (middleName CONTAINS[c] %@)OR (maidenName CONTAINS[c] %@)", term, term, term, term)
+            subpredicates.append(pred!)
+        }
+        let searchPredicate = NSCompoundPredicate(type: NSCompoundPredicateType.AndPredicateType, subpredicates: subpredicates)
+        println(searchPredicate)
+        return searchPredicate
+    }
+    
+    func phonesPredicate(#searchString:String) -> NSPredicate {
+        
+        let stringComponents = searchString.componentsSeparatedByString(" ")
+        let terms = searchString.componentsSeparatedByString(" ")
+        var subpredicates = [NSPredicate]()
+        for term in terms{
+            let pred = NSPredicate(format: "ANY phones.number CONTAINS %@)", term)
+            subpredicates.append(pred!)
+        }
+        let searchPredicate = NSCompoundPredicate(type: NSCompoundPredicateType.AndPredicateType, subpredicates: subpredicates)
+        return searchPredicate
+    }
+    
+    func doViewPerson (record:ABRecord!) {
+        if !addressBookModel.determineStatus() {
+            println("not authorized")
+            return
+        }
+        
+//        let snides = ABAddressBookCopyPeopleWithName(
+//            self.adbk, "Snidely Whiplash").takeRetainedValue() as Array<ABRecord>
+//        if snides.count == 0 {
+//            println("no Snidely")
+//            return
+//        }
+//        let snidely:ABRecord = snides[0]
+        let pvc = ABPersonViewController()
+        pvc.addressBook = addressBookModel.adbk
+        pvc.displayedPerson = record
+        pvc.personViewDelegate = self
+        pvc.displayedProperties = [Int(kABPersonEmailProperty)]
+        pvc.allowsEditing = false
+        pvc.allowsActions = false
+        showViewController(pvc, sender:self) // push onto navigation controller
+    }
+    
+    func personViewController(personViewController: ABPersonViewController!,
+        shouldPerformDefaultActionForPerson person: ABRecord!,
+        property: ABPropertyID, identifier: ABMultiValueIdentifier) -> Bool {
+            return true // if true, email tap launches email etc.
+    }
+    
+    // =========
+    
+    func add() {
+        let npvc = ABNewPersonViewController()
+        npvc.newPersonViewDelegate = self
+        let nc = UINavigationController(rootViewController:npvc)
+        presentViewController(nc, animated:true, completion:nil)
+    }
+    
+    func newPersonViewController(newPersonView: ABNewPersonViewController!,
+        didCompleteWithNewPerson person: ABRecord!) {
+            if person != nil {
+                save(person: person)
+//                // if we didn't have access, we wouldn't be here!
+//                // if we do not delete the person, the person will stay in the contacts database automatically!
+//                ABAddressBookRemoveRecord(self.adbk, person, nil)
+//                ABAddressBookSave(self.adbk, nil)
+//                let name = ABRecordCopyCompositeName(person).takeRetainedValue()
+//                println("I have a person named \(name), not saving this person to the database")
+//                // do something with new person
+            }
+            dismissViewControllerAnimated(true, completion:nil)
+    }
+
+    func save(#person:ABRecord!) -> Person{
+        let personObj = Person()
+        //        person.lastName = "Best"
+        let realm = RLMRealm.defaultRealm()
+        realm.transactionWithBlock { () -> Void in
+            personObj.update(fromRecord: person, inRealm: realm)
+            realm.addObject(personObj)
+        }
+        return personObj
+        //        Person.createInRealm(realm, withObject: ["lastName": "Best"])
+    }
+}
+
